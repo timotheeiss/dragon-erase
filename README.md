@@ -88,14 +88,13 @@ The demo subject is **Sarah Chen** (alias **Sally**). The seed script writes 12 
 
 ```mermaid
 pie showData title Expected labels (12 records)
-    "REDACT" : 5
+    "REDACT" : 6
     "DELETE" : 3
     "NO_ACTION" : 2
     "RETAIN" : 1
-    "OPEN: REDACT or DELETE" : 1
 ```
 
-> The pie counts Slack full-name and Salesforce note separately from the REDACT total only where the label is still an open team decision; the seeded value for both is currently `REDACT`.
+Two of the six REDACT labels (Slack full-name mention, Salesforce note) are still open team decisions between REDACT and DELETE.
 
 ## Demo flow
 
