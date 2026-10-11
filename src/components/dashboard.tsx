@@ -53,6 +53,7 @@ import {
   type RedactionSpan,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { findSpans } from "@/lib/redaction";
 
 const steps = [
   "Request",
@@ -204,6 +205,23 @@ export function Dashboard() {
   const completedIds = new Set(
     c?.results.filter((r) => r.status === "succeeded").map((r) => r.findingId),
   );
+  const canReview = Boolean(
+    finding &&
+    !finding.record.policyId &&
+    c &&
+    ["review", "approved"].includes(c.stage) &&
+    !completedIds.has(finding.id),
+  );
+  const previewAction = canReview ? editAction : proposal?.action;
+  const hasReviewChanges =
+    canReview &&
+    (editAction !== proposal?.action || editReason.trim().length > 0);
+  const previewSpans =
+    hasReviewChanges && finding && c?.subject
+      ? editAction === "redact"
+        ? findSpans(finding.record, c.subject)
+        : []
+      : (proposal?.spans ?? []);
   const visibleFindings =
     c?.findings.filter((f) => {
       const p = c.proposals.find((p) => p.findingId === f.id);
@@ -1053,10 +1071,17 @@ export function Dashboard() {
                                       )}
                                     </td>
                                     <td>
-                                      <ActionBadge
-                                        action={p.action}
-                                        needsReview={p.needsReview}
-                                      />
+                                      <button
+                                        className="verdict-button"
+                                        onClick={() => openFinding(f)}
+                                        aria-label={`Review verdict for ${f.record.title}`}
+                                      >
+                                        <ActionBadge
+                                          action={p.action}
+                                          needsReview={p.needsReview}
+                                        />
+                                        <ChevronRight size={12} />
+                                      </button>
                                     </td>
                                     <td>
                                       {result ? (
@@ -1378,15 +1403,140 @@ export function Dashboard() {
                 <DialogDescription>{finding.record.location}</DialogDescription>
                 <div className="drawer-badges">
                   <ActionBadge
-                    action={proposal?.action}
-                    needsReview={proposal?.needsReview}
+                    action={previewAction}
+                    needsReview={proposal?.needsReview && !hasReviewChanges}
                   />
+                  {hasReviewChanges && (
+                    <span className="badge badge-neutral">
+                      Unsaved decision
+                    </span>
+                  )}
                   <span className="badge badge-neutral">
                     {finding.matchedIdentifiers.length} matched identifiers
                   </span>
                 </div>
               </div>
               <div className="drawer-body">
+                {canReview && (
+                  <form className="review-form" onSubmit={saveReview}>
+                    <div className="detail-section-label">
+                      <MessageSquareText size={15} /> YOUR DECISION
+                    </div>
+                    {finding.uncertain ? (
+                      <p className="review-hint">
+                        Dismiss — this record belongs to a different person.
+                      </p>
+                    ) : (
+                      <>
+                        <fieldset className="verdict-picker" disabled={!!busy}>
+                          <legend className="sr-only">Finding verdict</legend>
+                          {(
+                            [
+                              {
+                                action: "delete",
+                                label: "Delete",
+                                Icon: Trash2,
+                              },
+                              {
+                                action: "redact",
+                                label: "Redact",
+                                Icon: Eraser,
+                              },
+                              {
+                                action: "retain",
+                                label: "Retain",
+                                Icon: ShieldCheck,
+                              },
+                            ] as const
+                          ).map(({ action, label, Icon }) => (
+                            <label
+                              className={`verdict-option verdict-${action}`}
+                              key={action}
+                            >
+                              <input
+                                type="radio"
+                                name="finding-verdict"
+                                value={action}
+                                checked={editAction === action}
+                                onChange={() => setEditAction(action)}
+                              />
+                              <Icon size={15} aria-hidden="true" />
+                              {label}
+                            </label>
+                          ))}
+                        </fieldset>
+                        <label className="false-positive-option">
+                          <input
+                            type="checkbox"
+                            checked={editAction === "dismiss"}
+                            disabled={!!busy}
+                            onChange={(event) =>
+                              setEditAction(
+                                event.target.checked
+                                  ? "dismiss"
+                                  : proposal?.action === "dismiss"
+                                    ? "redact"
+                                    : (proposal?.action ?? "redact"),
+                              )
+                            }
+                          />
+                          Exclude as a false positive
+                        </label>
+                      </>
+                    )}
+                    <p className="review-hint">
+                      {finding.uncertain
+                        ? "Record why this match should be excluded."
+                        : "Choose a verdict and record your reason."}{" "}
+                      Saving changes requires a fresh approval of the final
+                      plan.
+                    </p>
+                    <label className="field-label" htmlFor="review-reason">
+                      Reason for your decision
+                    </label>
+                    <textarea
+                      id="review-reason"
+                      rows={3}
+                      value={editReason}
+                      onChange={(event) => setEditReason(event.target.value)}
+                      minLength={8}
+                      maxLength={1000}
+                      required
+                      placeholder={
+                        finding.uncertain
+                          ? "Different email and company confirm this is another person."
+                          : "Explain why this is the appropriate action…"
+                      }
+                    />
+                    {finding.uncertain && (
+                      <button
+                        type="button"
+                        className="suggested-reason"
+                        onClick={() =>
+                          setEditReason(
+                            "Different email and company confirm this is another person. Exclude this record from the request.",
+                          )
+                        }
+                      >
+                        Use the identity evidence <ArrowRight size={12} />
+                      </button>
+                    )}
+                    {error && (
+                      <p className="inline-error" role="alert">
+                        {error}
+                      </p>
+                    )}
+                    <Button
+                      disabled={!!busy || editReason.trim().length < 8}
+                      type="submit"
+                    >
+                      <Check size={16} />
+                      {finding.uncertain
+                        ? "Confirm false positive"
+                        : "Save review decision"}
+                    </Button>
+                  </form>
+                )}
                 <section
                   className={cn(
                     "rationale-card",
@@ -1408,7 +1558,7 @@ export function Dashboard() {
                         ? "Same name. Different person."
                         : finding.record.policyId
                           ? "Protected by a deterministic rule"
-                          : "Why this action?"}
+                          : "Saved proposal"}
                     </strong>
                   </div>
                   <p>{proposal?.rationale ?? "Classification is pending."}</p>
@@ -1455,7 +1605,7 @@ export function Dashboard() {
                   ))}
                 </div>
                 <div className="detail-section-label">
-                  {proposal?.action === "redact"
+                  {previewAction === "redact"
                     ? "EXACT REDACTION PREVIEW"
                     : "SOURCE SNAPSHOT"}
                   <span>Read at discovery</span>
@@ -1467,22 +1617,17 @@ export function Dashboard() {
                   <h4>
                     <Highlight
                       text={finding.record.title}
-                      spans={
-                        proposal?.spans.filter((s) => s.field === "title") ?? []
-                      }
+                      spans={previewSpans.filter((s) => s.field === "title")}
                     />
                   </h4>
                   <pre>
                     <Highlight
                       text={finding.record.content}
-                      spans={
-                        proposal?.spans.filter((s) => s.field === "content") ??
-                        []
-                      }
+                      spans={previewSpans.filter((s) => s.field === "content")}
                     />
                   </pre>
                 </div>
-                {proposal?.action === "redact" && (
+                {previewAction === "redact" && (
                   <div className="source-preview after-preview">
                     <div className="preview-label">
                       <span className="preview-dot" /> After approval &
@@ -1491,16 +1636,14 @@ export function Dashboard() {
                     <h4>
                       <Highlight
                         text={finding.record.title}
-                        spans={proposal.spans.filter(
-                          (s) => s.field === "title",
-                        )}
+                        spans={previewSpans.filter((s) => s.field === "title")}
                         after
                       />
                     </h4>
                     <pre>
                       <Highlight
                         text={finding.record.content}
-                        spans={proposal.spans.filter(
+                        spans={previewSpans.filter(
                           (s) => s.field === "content",
                         )}
                         after
@@ -1512,7 +1655,7 @@ export function Dashboard() {
                     </small>
                   </div>
                 )}
-                {proposal?.action === "delete" && (
+                {previewAction === "delete" && (
                   <div className="delete-consequence">
                     <Trash2 size={17} />
                     <div>
@@ -1526,6 +1669,15 @@ export function Dashboard() {
                         comparison.
                       </p>
                     </div>
+                  </div>
+                )}
+                {previewAction === "retain" && !finding.record.policyId && (
+                  <div className="execution-detail">
+                    <strong>The source record will be preserved.</strong>
+                    <p>
+                      Your reason will be recorded in the audit log and
+                      completion report.
+                    </p>
                   </div>
                 )}
                 {c.results.find((r) => r.findingId === finding.id) && (
@@ -1546,90 +1698,6 @@ export function Dashboard() {
                     </small>
                   </div>
                 )}
-                {!finding.record.policyId &&
-                  ["review", "approved"].includes(c.stage) &&
-                  !completedIds.has(finding.id) && (
-                    <form className="review-form" onSubmit={saveReview}>
-                      <div className="detail-section-label">
-                        <MessageSquareText size={15} /> YOUR DECISION
-                      </div>
-                      <label className="field-label" htmlFor="review-action">
-                        Action
-                      </label>
-                      <select
-                        id="review-action"
-                        value={editAction}
-                        onChange={(event) =>
-                          setEditAction(event.target.value as Action)
-                        }
-                      >
-                        {finding.uncertain ? (
-                          <option value="dismiss">
-                            Dismiss — different person
-                          </option>
-                        ) : (
-                          <>
-                            <option value="delete">
-                              Delete the entire record
-                            </option>
-                            <option value="redact">
-                              Redact all matched identifiers
-                            </option>
-                            <option value="retain">
-                              Retain with a documented reason
-                            </option>
-                            <option value="dismiss">
-                              Dismiss as a false positive
-                            </option>
-                          </>
-                        )}
-                      </select>
-                      <label className="field-label" htmlFor="review-reason">
-                        Reason for your decision
-                      </label>
-                      <textarea
-                        id="review-reason"
-                        rows={3}
-                        value={editReason}
-                        onChange={(event) => setEditReason(event.target.value)}
-                        minLength={8}
-                        maxLength={1000}
-                        required
-                        placeholder={
-                          finding.uncertain
-                            ? "Different email and company confirm this is another person."
-                            : "Explain why this is the appropriate action…"
-                        }
-                      />
-                      {finding.uncertain && (
-                        <button
-                          type="button"
-                          className="suggested-reason"
-                          onClick={() =>
-                            setEditReason(
-                              "Different email and company confirm this is another person. Exclude this record from the request.",
-                            )
-                          }
-                        >
-                          Use the identity evidence <ArrowRight size={12} />
-                        </button>
-                      )}
-                      {error && (
-                        <p className="inline-error" role="alert">
-                          {error}
-                        </p>
-                      )}
-                      <Button
-                        disabled={!!busy || editReason.trim().length < 8}
-                        type="submit"
-                      >
-                        <Check size={16} />
-                        {finding.uncertain
-                          ? "Confirm false positive"
-                          : "Save review decision"}
-                      </Button>
-                    </form>
-                  )}
               </div>
               <div className="drawer-footer">
                 <LockKeyhole size={13} />

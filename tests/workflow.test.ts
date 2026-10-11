@@ -249,6 +249,54 @@ test("plan edits invalidate approval and reject approval of an older version", a
   );
 });
 
+for (const action of ["delete", "redact", "retain"] as const) {
+  test(`reviewer can change any verdict to ${action}, with fresh approval and matching execution`, async (t) => {
+    const store = storeFor(t);
+    const before = store.record("sf-contact")!;
+    let c = await reviewed(store);
+    for (const previous of ["delete", "redact", "retain"] as const) {
+      if (previous === action) continue;
+      c = editProposal(
+        store,
+        c.id,
+        before.id,
+        previous,
+        "Initial human review decision.",
+      );
+      approve(store, c);
+      const version = c.planVersion;
+      c = editProposal(
+        store,
+        c.id,
+        before.id,
+        action,
+        `Human reviewed evidence and chose ${action}.`,
+      );
+      const proposal = c.proposals.find((p) => p.findingId === before.id)!;
+      assert.equal(proposal.action, action);
+      assert.equal(proposal.origin, "human");
+      assert.deepEqual(
+        proposal.spans,
+        action === "redact" ? findSpans(before, subjects[0]) : [],
+      );
+      assert.equal(c.approval, null);
+      assert.equal(c.planVersion, version + 1);
+      assert.equal(c.audit.at(-1)!.detail!.previousAction, previous);
+      assert.deepEqual(store.record(before.id), before);
+      assert.throws(() => executeCase(store, c.id, false), /not available/);
+    }
+    approve(store, c);
+    executeCase(store, c.id, false);
+    const record = store.record(before.id)!;
+    assert.equal(record.deleted, action === "delete");
+    if (action === "retain") assert.deepEqual(record, before);
+    else assert.equal(findSpans(record, subjects[0]).length, 0);
+    if (action === "redact")
+      assert.match(record.content, /Status: Former customer/);
+    assert.equal(verifyCase(store, c.id).verification!.complete, true);
+  });
+}
+
 test("a source change after approval pauses execution until refreshed and reapproved", async (t) => {
   const store = storeFor(t);
   const c = await reviewed(store);

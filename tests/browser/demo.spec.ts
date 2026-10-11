@@ -63,6 +63,66 @@ test("guided walkthrough, human approval, failure recovery, verification and rep
     },
   });
   expect(protectedEdit.status()).toBe(409);
+  const customerTitle = "Alex Morgan · customer contact";
+  for (const verdict of ["Redact", "Retain", "Delete"] as const) {
+    await page
+      .getByRole("button", {
+        name: `Review verdict for ${customerTitle}`,
+        exact: true,
+      })
+      .click();
+    const dialog = page.getByRole("dialog");
+    for (const option of ["Delete", "Redact", "Retain"]) {
+      await expect(
+        dialog.getByRole("radio", { name: option, exact: true }),
+      ).toBeVisible();
+    }
+    await dialog.getByRole("radio", { name: verdict, exact: true }).check();
+    await expect(
+      dialog.getByRole("button", { name: "Save review decision" }),
+    ).toBeDisabled();
+    if (verdict === "Redact") {
+      await expect(dialog.getByText("EXACT REDACTION PREVIEW")).toBeVisible();
+      await expect(dialog.locator(".after-preview")).toContainText(
+        "[redacted]",
+      );
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(
+        dialog.getByRole("radio", { name: "Retain", exact: true }),
+      ).toBeInViewport();
+      await page.screenshot({ path: "test-results/verdict-mobile.png" });
+      await page.setViewportSize({ width: 1440, height: 1100 });
+    } else if (verdict === "Retain") {
+      await expect(
+        dialog.getByText("The source record will be preserved."),
+      ).toBeVisible();
+      await expect(dialog.locator(".after-preview")).toHaveCount(0);
+    } else {
+      await expect(
+        dialog.getByText("The whole synthetic record will be deleted."),
+      ).toBeVisible();
+    }
+    await dialog
+      .getByLabel("Reason for your decision")
+      .fill(
+        `Reviewer chose ${verdict.toLowerCase()} for this synthetic customer record.`,
+      );
+    await dialog.getByRole("button", { name: "Save review decision" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(
+      page.getByRole("button", {
+        name: `Review verdict for ${customerTitle}`,
+        exact: true,
+      }),
+    ).toHaveText(verdict);
+    await page.reload();
+    await expect(
+      page.getByRole("button", {
+        name: `Review verdict for ${customerTitle}`,
+        exact: true,
+      }),
+    ).toHaveText(verdict);
+  }
   await page
     .getByRole("button", {
       name: "Review Customer research · Q3 synthesis",
