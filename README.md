@@ -8,18 +8,9 @@ An agent that handles a GDPR **right to erasure** request (Article 17): given on
 
 ## Pipeline
 
-```mermaid
-flowchart LR
-    A[Request] --> B[Identify]
-    B --> C[Discover]
-    C --> D[Classify]
-    D --> E{Human review}
-    E -- approved --> F[Execute]
-    E -- changes --> D
-    F --> G[Verify]
-    G -- hits remain --> C
-    G -- zero hits --> H[Certificate]
-```
+![Erasure pipeline: Request, Identify, Discover, Classify (Delete / Redact / Retain), Human approval, Execute, Verify, Certificate](docs/pipeline.webp)
+
+Rejected plans loop back to Classify. If Verify still finds hits, the agent loops back to Discover. The certificate records what was done and when, within the one-month response window.
 
 | Step | What happens |
 |---|---|
@@ -135,6 +126,8 @@ erasure/
   models.py    labels, platforms, subject, record, expectation
   subject.py   the synthetic subject (Sarah Chen) and the decoy name
   seed.py      builds the simulated platforms and ground truth
+docs/
+  pipeline.webp  pipeline diagram used in this README
 tests/
   test_seed.py dataset shape and expected-label checks
 ```
