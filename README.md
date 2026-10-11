@@ -114,10 +114,29 @@ sequenceDiagram
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+python -m pytest -q                      # seed data + API flow tests
 
-python -m erasure.seed        # writes sim_data/ (12 records, images, xlsx, expected_labels.json)
-python -m pytest -q           # checks the dataset against expected labels
+cd frontend && npm install && npm run build && cd ..
+uvicorn erasure.api:app --port 8000      # serves the API and the built UI at http://localhost:8000
 ```
+
+Frontend development with hot reload: run the backend as above, then `cd frontend && npm run dev` (Vite on :5173 proxies `/api` to :8000).
+
+`python -m erasure.seed` regenerates `sim_data/` on demand. The API makes a throwaway working copy of it, so **Reset demo** in the UI restores everything.
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/state` | Full workspace state: requests, records, matches, decisions, execution, verification, audit |
+| `POST /api/requests` | Create a request and run discovery |
+| `POST /api/requests/{id}/select`, `POST /api/scan` | Switch request, re-run discovery |
+| `PUT /api/decisions` | Record a reviewer decision (approve / change / reject with justification) |
+| `POST /api/execute` | Run only approved DELETE / REDACT / RETAIN actions |
+| `POST /api/verify` | Re-scan; reports deleted, redacted, retained, unresolved, reappeared |
+| `GET /api/certificate` | Erasure certificate: findings, decisions, actions, timestamps, limitations |
+| `POST /api/crm-sync` | Demo only: a stale sync re-creates an erased record so Verify can catch it |
+| `POST /api/reset` | Restore the seed data |
 
 ## Repository layout
 
@@ -126,18 +145,29 @@ erasure/
   models.py    labels, platforms, subject, record, expectation
   subject.py   the synthetic subject (Sarah Chen) and the decoy name
   seed.py      builds the simulated platforms and ground truth
+  engine.py    identify/discover/classify, execute, verify, certificate
+  api.py       FastAPI app (also serves frontend/dist)
+frontend/      EraseFlow React + Vite UI (talks to /api)
 docs/
   pipeline.webp  pipeline diagram used in this README
-tests/
-  test_seed.py dataset shape and expected-label checks
+tests/         seed-data and API flow tests
 ```
+
+## Behaviour worth knowing
+
+- Alias-only matches (for example "Sally") are never treated as proof of identity; they stay `MANUAL REVIEW` until a reviewer decides.
+- Role-only references ("our Berlin partnerships lead") are found via the request's role references and marked as indirect, lower-confidence matches.
+- `RETAIN` needs a written justification; the invoice stays unresolved until one is given.
+- Image redaction blacks out the name and face regions and re-saves without EXIF. Spreadsheet deletion removes only the requester's row.
+- Discovery is exact-string and rule-based; there is no real OCR or face detection yet (the seed data carries the OCR text).
 
 ## Status
 
 - [x] Models, synthetic dataset, ground-truth labels, tests
-- [ ] Pipeline: identify, discover, classify, review, execute, verify, certificate
-- [ ] FastAPI backend
-- [ ] Web UI connected to the backend
+- [x] Pipeline: identify, discover, classify, review, execute, verify, certificate
+- [x] FastAPI backend
+- [x] EraseFlow UI connected to the backend
+- [ ] Real OCR and face detection for images
 - [ ] Optional: live platform connectors
 
 ## Open decisions

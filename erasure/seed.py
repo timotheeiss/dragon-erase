@@ -128,7 +128,8 @@ def build(root: Path) -> list[tuple[Record, Expectation]]:
                      reason="Different person with a near-miss name; must stay untouched.")),
     ]
 
-    for rec, _ in items:
+    for i, (rec, _) in enumerate(items):
+        rec.created_at = f"2025-01-{10 + i:02d}"
         out = root / rec.platform.value / f"{rec.id}.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(rec.model_dump_json(indent=2))

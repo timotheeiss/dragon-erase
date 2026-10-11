@@ -29,6 +29,7 @@ class Subject(BaseModel):
     phones: list[str] = Field(default_factory=list)
     slack_handle: str | None = None
     crm_contact_id: str | None = None
+    roles: list[str] = Field(default_factory=list)  # role-only references, e.g. "Berlin partnerships lead"
 
 
 class Record(BaseModel):
@@ -41,6 +42,7 @@ class Record(BaseModel):
     content: str = ""              # text body; empty for binary files
     owner: str | None = None       # who the item belongs to
     file: str | None = None        # path (relative to sim root) of a binary payload
+    created_at: str = "2025-01-15"  # synthetic creation date (YYYY-MM-DD)
     metadata: dict = Field(default_factory=dict)
 
 
