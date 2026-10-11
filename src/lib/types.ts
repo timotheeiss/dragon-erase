@@ -22,6 +22,7 @@ export interface Subject {
   company: string;
   email: string;
   identifiers: { kind: string; value: string; source: string }[];
+  searchContext?: { value: string; description: string; source: string }[];
 }
 
 export interface ProtectionPolicy {
@@ -58,6 +59,7 @@ export interface Finding {
   sourceHash: string;
   matchedIdentifiers: string[];
   uncertain: boolean;
+  contextTerms?: string[];
 }
 
 export interface ActionProposal {
@@ -145,6 +147,7 @@ export interface AppState {
     protected: number;
   }[];
   aiConfigured: boolean;
+  fixtureUpdateAvailable: boolean;
 }
 
 export const platformNames: Record<Platform, string> = {

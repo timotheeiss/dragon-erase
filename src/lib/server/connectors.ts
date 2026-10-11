@@ -10,6 +10,7 @@ import {
 } from "../types";
 import type { Store } from "./store";
 import { findSpans } from "../redaction";
+import { contextMessageSpans, messageSearchTerms } from "../message-search";
 export { findSpans } from "../redaction";
 
 export function contentHash(record: SourceRecord): string {
@@ -53,7 +54,8 @@ export function connectors(store: Store): Connector[] {
         .filter((record) => record.platform === platform && !record.deleted)
         .flatMap((record) => {
           const spans = findSpans(record, subject);
-          if (!spans.length) return [];
+          const context = contextMessageSpans(record, subject);
+          if (!spans.length && !context.length) return [];
           const uncertain = Boolean(
             record.subjectId && record.subjectId !== subject.id,
           );
@@ -64,6 +66,9 @@ export function connectors(store: Store): Connector[] {
               sourceHash: contentHash(record),
               matchedIdentifiers: [...new Set(spans.map((span) => span.text))],
               uncertain,
+              ...(context.length
+                ? { contextTerms: messageSearchTerms(subject) }
+                : {}),
             },
           ];
         });
@@ -112,7 +117,11 @@ export function connectors(store: Store): Connector[] {
           findSpans(record, subject).length === 0
         );
       if (proposal.action === "redact")
-        return !record.deleted && findSpans(record, subject).length === 0;
+        return (
+          !record.deleted &&
+          findSpans(record, subject).length === 0 &&
+          contextMessageSpans(record, subject).length === 0
+        );
       return !record.deleted;
     },
   }));

@@ -53,7 +53,7 @@ import {
   type RedactionSpan,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { findSpans } from "@/lib/redaction";
+import { proposedRedactionSpans } from "@/lib/message-search";
 
 const steps = [
   "Request",
@@ -219,7 +219,7 @@ export function Dashboard() {
   const previewSpans =
     hasReviewChanges && finding && c?.subject
       ? editAction === "redact"
-        ? findSpans(finding.record, c.subject)
+        ? proposedRedactionSpans(finding.record, c.subject)
         : []
       : (proposal?.spans ?? []);
   const visibleFindings =
@@ -397,6 +397,18 @@ export function Dashboard() {
           </div>
         </header>
         <main>
+          {data?.fixtureUpdateAvailable && (
+            <div className="fixture-update" role="status">
+              <MessageSquareText size={18} />
+              <span>
+                The updated demo searches Slack message contents. Reset once to
+                load the new examples and clear the previous demo case.
+              </span>
+              <Button variant="outline" onClick={() => setModal("reset")}>
+                Load updated demo
+              </Button>
+            </div>
+          )}
           {error && (
             <div className="error-banner" role="alert">
               <CircleHelp size={18} />
@@ -604,7 +616,7 @@ export function Dashboard() {
                       <span>
                         <strong>Discover the data</strong>
                         <small>
-                          Follow verified identifiers across systems.
+                          Find direct mentions and contextual message matches.
                         </small>
                       </span>
                     </div>
@@ -734,6 +746,18 @@ export function Dashboard() {
                                 </div>
                               ))}
                           </div>
+                          {(
+                            c.candidates.find((s) => s.id === selectedSubject)
+                              ?.searchContext ?? []
+                          ).map((fact) => (
+                            <p className="review-hint" key={fact.value}>
+                              Message-search context:{" "}
+                              <strong>{fact.value}</strong> · {fact.source}.{" "}
+                              {fact.description} Slack searches employee
+                              messages about this customer; no customer Slack
+                              account is assumed.
+                            </p>
+                          ))}
                         </div>
                       )}
                       <div className="identity-confirm">
@@ -794,8 +818,9 @@ export function Dashboard() {
                         {c.subject!.identifiers.length} confirmed identifiers.
                         Five simulated systems.
                         <br />
-                        The agent can propose changes. Only you can approve
-                        them.
+                        Search Slack message contents for direct mentions and
+                        related support history. The agent reviews candidate
+                        messages. Only you can approve changes.
                       </p>
                       <div className="discovery-sources">
                         {data.sources.map((source) => (
@@ -1019,7 +1044,7 @@ export function Dashboard() {
                             <thead>
                               <tr>
                                 <th>RECORD / SOURCE</th>
-                                <th>MATCHED IDENTIFIER</th>
+                                <th>MATCH EVIDENCE</th>
                                 <th>PROPOSED ACTION</th>
                                 <th>{c.results.length ? "RESULT" : "BASIS"}</th>
                                 <th>
@@ -1061,13 +1086,24 @@ export function Dashboard() {
                                       </button>
                                     </td>
                                     <td>
-                                      <span className="identifier-chip">
-                                        {f.matchedIdentifiers[0]}
-                                      </span>
-                                      {f.matchedIdentifiers.length > 1 && (
-                                        <span className="extra-matches">
-                                          +{f.matchedIdentifiers.length - 1}
+                                      {f.contextTerms?.length ? (
+                                        <span className="context-match-label">
+                                          <Sparkles size={12} /> Context match
+                                          <small>
+                                            Company + support history
+                                          </small>
                                         </span>
+                                      ) : (
+                                        <>
+                                          <span className="identifier-chip">
+                                            {f.matchedIdentifiers[0]}
+                                          </span>
+                                          {f.matchedIdentifiers.length > 1 && (
+                                            <span className="extra-matches">
+                                              +{f.matchedIdentifiers.length - 1}
+                                            </span>
+                                          )}
+                                        </>
                                       )}
                                     </td>
                                     <td>
@@ -1183,7 +1219,7 @@ export function Dashboard() {
                             <strong>
                               {c.stage === "review"
                                 ? needsReview
-                                  ? `${needsReview} identity matches need your attention`
+                                  ? `${needsReview} findings need your attention`
                                   : "The plan is ready for your approval"
                                 : c.stage === "approved"
                                   ? "Approved. Ready to execute."
@@ -1412,7 +1448,9 @@ export function Dashboard() {
                     </span>
                   )}
                   <span className="badge badge-neutral">
-                    {finding.matchedIdentifiers.length} matched identifiers
+                    {finding.contextTerms?.length
+                      ? "Contextual candidate"
+                      : `${finding.matchedIdentifiers.length} matched identifiers`}
                   </span>
                 </div>
               </div>
@@ -1487,7 +1525,9 @@ export function Dashboard() {
                     <p className="review-hint">
                       {finding.uncertain
                         ? "Record why this match should be excluded."
-                        : "Choose a verdict and record your reason."}{" "}
+                        : finding.contextTerms?.length
+                          ? "Confirm whether this message refers to the customer, then choose a verdict and record the evidence."
+                          : "Choose a verdict and record your reason."}{" "}
                       Saving changes requires a fresh approval of the final
                       plan.
                     </p>
@@ -1519,6 +1559,19 @@ export function Dashboard() {
                         }
                       >
                         Use the identity evidence <ArrowRight size={12} />
+                      </button>
+                    )}
+                    {!!finding.contextTerms?.length && !finding.uncertain && (
+                      <button
+                        type="button"
+                        className="suggested-reason"
+                        onClick={() =>
+                          setEditReason(
+                            "The company and export-settings issue match the customer's support history. I confirm this message refers to the selected customer.",
+                          )
+                        }
+                      >
+                        Use the contextual evidence <ArrowRight size={12} />
                       </button>
                     )}
                     {error && (
@@ -1558,7 +1611,9 @@ export function Dashboard() {
                         ? "Same name. Different person."
                         : finding.record.policyId
                           ? "Protected by a deterministic rule"
-                          : "Saved proposal"}
+                          : finding.contextTerms?.length
+                            ? "Possible connection in message content"
+                            : "Saved proposal"}
                     </strong>
                   </div>
                   <p>{proposal?.rationale ?? "Classification is pending."}</p>
@@ -1597,12 +1652,24 @@ export function Dashboard() {
                   </div>
                 )}
                 <div className="detail-section-label">MATCH EVIDENCE</div>
+                {finding.record.platform === "slack" && (
+                  <div className="message-evidence">
+                    <strong>Search scope: employee message contents</strong>
+                    <p>
+                      {finding.contextTerms?.length
+                        ? "No customer name or email appears in this message. The company and support topic retrieved it as a candidate. AI reviews the connection when live classification is enabled; scripted mode uses the labeled demo example. A human must confirm the match."
+                        : "An employee mentions a matching customer identifier. Read the surrounding messages to confirm who they mean. The customer does not need a Slack account."}
+                    </p>
+                  </div>
+                )}
                 <div className="matched-tags">
-                  {finding.matchedIdentifiers.map((identifier) => (
-                    <span className="identifier-chip" key={identifier}>
-                      {identifier}
-                    </span>
-                  ))}
+                  {(finding.contextTerms ?? finding.matchedIdentifiers).map(
+                    (identifier) => (
+                      <span className="identifier-chip" key={identifier}>
+                        {identifier}
+                      </span>
+                    ),
+                  )}
                 </div>
                 <div className="detail-section-label">
                   {previewAction === "redact"
@@ -1894,7 +1961,10 @@ export function Dashboard() {
                     <span>
                       <strong>{platformNames[source.platform]}</strong>
                       <small>
-                        {source.active} active / {source.total} seeded records{" "}
+                        {source.active} active / {source.total} seeded{" "}
+                        {source.platform === "slack"
+                          ? "message threads"
+                          : "records"}{" "}
                         {source.protected > 0 &&
                           `· ${source.protected} protected`}
                       </small>

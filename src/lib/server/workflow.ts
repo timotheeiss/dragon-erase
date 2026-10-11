@@ -10,7 +10,8 @@ import {
   type Finding,
 } from "../types";
 import { classify, scriptedProposals, type Classifier } from "./classifier";
-import { connectors, contentHash, findSpans } from "./connectors";
+import { messageSearchTerms, proposedRedactionSpans } from "../message-search";
+import { connectors, contentHash } from "./connectors";
 import type { Store } from "./store";
 
 export class WorkflowError extends Error {
@@ -75,6 +76,9 @@ export function getState(store: Store): AppState {
   const records = store.listRecords();
   return {
     activeCase: store.activeCase(),
+    fixtureUpdateAvailable: records.some(
+      (record) => record.id === "slack-intro",
+    ),
     policies,
     sources: platforms.map((platform) => ({
       platform,
@@ -179,12 +183,21 @@ export function discoverCase(store: Store, id: string) {
       c,
       "connector",
       "connector.discover",
-      `Searched ${connector.platform}; found ${findings.length} matching records.`,
+      connector.platform === "slack"
+        ? `Searched employee message contents; found ${findings.length} Slack candidates, including ${findings.filter((f) => f.contextTerms?.length).length} contextual matches for human review.`
+        : `Searched ${connector.platform}; found ${findings.length} matching records.`,
       undefined,
       {
         platform: connector.platform,
         matches: findings.length,
         simulated: true,
+        ...(connector.platform === "slack"
+          ? {
+              searchScope: "message contents",
+              contextSearchTerms: messageSearchTerms(c.subject!),
+              exactIdentifierCount: c.subject!.identifiers.length,
+            }
+          : {}),
       },
     );
     return findings;
@@ -241,6 +254,10 @@ export async function classifyCase(
         needsReview: proposal.needsReview,
         origin: proposal.origin,
         spanCount: proposal.spans.length,
+        matchMethod: c.findings.find((f) => f.id === proposal.findingId)
+          ?.contextTerms?.length
+          ? "context candidate"
+          : "identifier",
       },
     );
   store.saveCase(c);
@@ -309,7 +326,10 @@ export function editProposal(
     reviewerReason: reason.trim(),
     needsReview: false,
     origin: "human",
-    spans: action === "redact" ? findSpans(finding.record, c.subject!) : [],
+    spans:
+      action === "redact"
+        ? proposedRedactionSpans(finding.record, c.subject!)
+        : [],
   };
   validatePolicy(c, next, finding);
   c.proposals = c.proposals.map((item) =>
@@ -567,7 +587,7 @@ export function verifyCase(store: Store, id: string) {
         reason:
           result?.status === "failed"
             ? result.message
-            : "Direct verification found remaining identifiers, changed content, or unavailable evidence.",
+            : "Direct verification found remaining identifiers or contextual references, changed content, or unavailable evidence.",
       });
       continue;
     }
@@ -594,7 +614,7 @@ export function verifyCase(store: Store, id: string) {
       verification.unresolved.push({
         recordId: residual.id,
         reason:
-          "Discovery found an unaccounted-for identifier. A new reviewed proposal is required.",
+          "Discovery found an unaccounted-for identifier or contextual message. A new reviewed proposal is required.",
       });
   }
   verification.complete = verification.unresolved.length === 0;

@@ -4,6 +4,10 @@ import { Store } from "../src/lib/server/store";
 import { assertLocalRequest } from "../src/lib/server/http";
 import { subjects, seedRecords } from "../src/lib/fixtures";
 import {
+  contextMessageSpans,
+  proposedRedactionSpans,
+} from "../src/lib/message-search";
+import {
   classify,
   scriptedProposals,
   validateModelOutput,
@@ -24,6 +28,7 @@ import {
   editProposal,
   executeCase,
   exportReport,
+  getState,
   refreshFindings,
   verifyCase,
 } from "../src/lib/server/workflow";
@@ -85,6 +90,17 @@ async function reviewed(store: Store) {
       "dismiss",
       "Different confirmed email and company; this is another person.",
     );
+  for (const finding of store
+    .getCase(c.id)!
+    .findings.filter((f) => f.contextTerms?.length)) {
+    editProposal(
+      store,
+      c.id,
+      finding.id,
+      "redact",
+      "The company and export-settings issue match the verified support history. Confirmed by the reviewer.",
+    );
+  }
   return store.getCase(c.id)!;
 }
 function approve(store: Store, c: ErasureCase) {
@@ -126,6 +142,136 @@ test("unknown customers do not create a case; same-name identities require confi
     /Select a candidate/,
   );
   assert.throws(() => discoverCase(store, c.id), /not available/);
+});
+
+test("Slack discovery searches employee messages without assuming a customer Slack account", (t) => {
+  const store = storeFor(t);
+  assert.ok(
+    subjects.every((s) => s.identifiers.every((i) => !/slack/i.test(i.kind))),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(seedRecords()),
+    /@alexm|U_DEMO_ALEX|Slack handle/,
+  );
+  const adapter = connectors(store).find((a) => a.platform === "slack")!;
+  const findings = adapter.discover(subjects[0]);
+  assert.equal(findings.length, 3);
+  assert.ok(
+    findings
+      .find((f) => f.id === "slack-handoff")!
+      .matchedIdentifiers.includes("Alex Morgan"),
+  );
+  const contextual = findings.find((f) => f.id === "slack-context")!;
+  assert.deepEqual(contextual.matchedIdentifiers, []);
+  assert.deepEqual(contextual.contextTerms, [
+    "Northstar Studio",
+    "export settings",
+  ]);
+  assert.equal(contextual.record.subjectId, undefined);
+  assert.equal(findings.find((f) => f.id === "slack-partner")!.uncertain, true);
+  assert.ok(!adapter.discover(subjects[1]).some((f) => f.id === contextual.id));
+});
+
+test("contextual redaction requires human review, preserves replies, and remains discoverable if reintroduced", async (t) => {
+  const store = storeFor(t);
+  const original = store.record("slack-context")!;
+  const c = createCase(store, "Alex Morgan");
+  confirmIdentity(store, c.id, subjects[0].id, true);
+  discoverCase(store, c.id);
+  await classifyCase(store, c.id, offline);
+  const initial = store.getCase(c.id)!;
+  for (const f of initial.findings.filter((f) => f.uncertain))
+    editProposal(
+      store,
+      c.id,
+      f.id,
+      "dismiss",
+      "The email and company belong to the unrelated partner.",
+    );
+  assert.throws(() => approve(store, store.getCase(c.id)!), /Resolve all/);
+  const updated = editProposal(
+    store,
+    c.id,
+    original.id,
+    "redact",
+    "Confirmed contextual customer mention from the company and support case.",
+  );
+  assert.deepEqual(
+    updated.proposals.find((p) => p.findingId === original.id)!.spans,
+    proposedRedactionSpans(original, subjects[0]),
+  );
+  approve(store, updated);
+  executeCase(store, c.id, false);
+  const redacted = store.record(original.id)!;
+  assert.match(
+    redacted.content,
+    /^Jamie: \[redacted\]\nPriya: Let's keep the troubleshooting checklist/,
+  );
+  assert.equal(verifyCase(store, c.id).verification!.complete, true);
+  redacted.content += "\n" + original.content.split("\n")[0];
+  redacted.version++;
+  store.putRecord(redacted);
+  assert.equal(findSpans(redacted, subjects[0]).length, 0);
+  assert.equal(contextMessageSpans(redacted, subjects[0]).length, 1);
+  const residual = verifyCase(store, c.id);
+  assert.equal(residual.verification!.complete, false);
+  assert.ok(
+    residual.verification!.unresolved.some(
+      (item) => item.recordId === original.id,
+    ),
+  );
+});
+
+test("AI cannot waive contextual review or redact an unrelated Slack reply", (t) => {
+  const store = storeFor(t);
+  const finding = connectors(store)
+    .find((a) => a.platform === "slack")!
+    .discover(subjects[0])
+    .find((f) => f.id === "slack-context")!;
+  const proposed = scriptedProposals([finding], subjects[0])[0];
+  const raw = {
+    findingId: proposed.findingId,
+    action: proposed.action,
+    rationale: "Similar company and support issue.",
+    spans: proposed.spans,
+    policyId: null,
+    needsReview: false,
+  };
+  assert.equal(
+    validateModelOutput({ proposals: [raw] }, [finding], subjects[0])[0]
+      .needsReview,
+    true,
+  );
+  const text = "Let's keep the troubleshooting checklist for future customers.";
+  const start = finding.record.content.indexOf(text);
+  assert.throws(
+    () =>
+      validateModelOutput(
+        {
+          proposals: [
+            {
+              ...raw,
+              spans: [
+                { field: "content", start, end: start + text.length, text },
+              ],
+            },
+          ],
+        },
+        [finding],
+        subjects[0],
+      ),
+    /outside the allowed source spans/,
+  );
+});
+
+test("old Slack fixtures prompt an explicit reset, which loads message examples", (t) => {
+  const store = storeFor(t);
+  assert.equal(getState(store).fixtureUpdateAvailable, false);
+  store.putRecord({ ...store.record("slack-context")!, id: "slack-intro" });
+  assert.equal(getState(store).fixtureUpdateAvailable, true);
+  store.reset();
+  assert.equal(getState(store).fixtureUpdateAvailable, false);
+  assert.equal(store.listRecords().length, 15);
 });
 
 test("calendar-month deadline clamps month end and preserves UTC time", () => {
@@ -442,7 +588,7 @@ test("model output rejects invented records, policies and redaction spans", (t) 
         findings,
         subjects[0],
       ),
-    /outside the verified identifiers/,
+    /outside the allowed source spans/,
   );
 });
 

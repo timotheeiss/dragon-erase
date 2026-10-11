@@ -22,6 +22,11 @@ test("guided walkthrough, human approval, failure recovery, verification and rep
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.getByRole("button", { name: "Start erasure request" }).click();
   await page.getByTestId("candidate-subject-alex-customer").click();
+  await expect(page.getByText("Slack handle", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Slack ID", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Message-search context:/)).toContainText(
+    "export settings",
+  );
   await page
     .getByRole("checkbox", { name: "I confirm this identity for the demo." })
     .check();
@@ -145,6 +150,39 @@ test("guided walkthrough, human approval, failure recovery, verification and rep
     await page.getByRole("button", { name: "Confirm false positive" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
+  await expect(
+    page.getByRole("button", { name: "Review & approve" }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", {
+      name: "Review Export follow-up",
+      exact: true,
+    })
+    .click();
+  const contextDialog = page.getByRole("dialog");
+  await expect(
+    contextDialog.getByText("Possible connection in message content"),
+  ).toBeVisible();
+  await expect(
+    contextDialog.getByText("Search scope: employee message contents"),
+  ).toBeVisible();
+  await expect(contextDialog.locator(".source-preview").first()).toContainText(
+    "Northstar Studio customer",
+  );
+  await expect(contextDialog.locator(".after-preview")).toContainText(
+    "Jamie: [redacted]",
+  );
+  await expect(contextDialog.locator(".after-preview")).toContainText(
+    "Priya: Let's keep the troubleshooting checklist",
+  );
+  await page.screenshot({ path: "test-results/slack-context-review.png" });
+  await contextDialog
+    .getByRole("button", { name: "Use the contextual evidence" })
+    .click();
+  await contextDialog
+    .getByRole("button", { name: "Save review decision" })
+    .click();
+  await expect(contextDialog).toHaveCount(0);
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Review & approve" }),

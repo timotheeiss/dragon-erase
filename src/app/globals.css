@@ -2346,6 +2346,45 @@ main {
   line-height: 1.7;
   margin-top: 12px;
 }
+.context-match-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: #796497;
+  font-size: 11px;
+}
+.context-match-label small {
+  flex-basis: 100%;
+  font-size: 9px;
+  color: #728761;
+}
+.message-evidence {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #647855;
+  margin-bottom: 12px;
+}
+.message-evidence p {
+  margin-top: 6px;
+}
+.fixture-update {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+  border: 1px solid #dbe5d0;
+  border-radius: 8px;
+  background: #f1f7eb;
+  color: #527243;
+  font-size: 12px;
+}
+.fixture-update span {
+  flex: 1;
+  min-width: 180px;
+}
 .review-form > .field-label {
   margin-top: 15px;
 }
